@@ -1,0 +1,14 @@
+{
+  "name": "tietheknot-subscription",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": ["apps/*"],
+  "scripts": {
+    "build": "npm run build --workspace=@tietheknot/planner && npm run build --workspace=@tietheknot/invitation-studio && npm run build --workspace=@tietheknot/api",
+    "test": "npm run test --workspaces --if-present",
+    "test:api": "npm run test --workspace=@tietheknot/api",
+    "dev:planner": "npm run dev --workspace=@tietheknot/planner",
+    "dev:studio": "npm run dev --workspace=@tietheknot/invitation-studio",
+    "dev:api": "npm run dev --workspace=@tietheknot/api"
+  }
+}

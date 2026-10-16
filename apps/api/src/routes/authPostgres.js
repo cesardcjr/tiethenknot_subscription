@@ -1,0 +1,20 @@
+const router = require("express").Router();
+const jwt = require("jsonwebtoken");
+const bcrypt = require("bcryptjs");
+const { database } = require("../config/db");
+const SECRET_QUESTIONS = ["What was the name of your first pet?", "What was the name of the street you grew up on?", "What was your childhood nickname?", "What was the first name of your favorite teacher?", "In which city were you born?", "What is your favorite food?"];
+const safe = (row) => ({ _id: row.id, username: row.username, fullName: row.full_name, contactNumber: row.contact_number, isAdmin: row.is_admin, isActive: row.status === "active", createdDate: row.created_at });
+const token = (id) => jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: "30d" });
+
+router.post("/register", async (req, res) => {
+  const username = String(req.body.username || "").trim().toLowerCase(); const password = String(req.body.password || ""); const fullName = String(req.body.fullName || "").trim(); const contactNumber = String(req.body.contactNumber || "").trim(); const secretQuestion = String(req.body.secretQuestion || "").trim(); const secretAnswer = String(req.body.secretAnswer || "").trim();
+  if (!username || !password || !fullName || !contactNumber || !secretQuestion || !secretAnswer) return res.status(400).json({ message: "All fields are required" });
+  if (password.length < 6) return res.status(400).json({ message: "Password must be at least 6 characters" });
+  if (!SECRET_QUESTIONS.includes(secretQuestion)) return res.status(400).json({ message: "Please choose a valid secret question" });
+  const client = await database().connect();
+  try { await client.query("begin"); const result = await client.query("insert into profiles (username,password_hash,full_name,contact_number,secret_question,secret_answer_hash) values ($1,$2,$3,$4,$5,$6) returning *", [username, await bcrypt.hash(password, 12), fullName, contactNumber, secretQuestion, await bcrypt.hash(secretAnswer.toLowerCase(), 12)]); const workspace = await client.query("insert into workspaces (name) values ($1) returning id", [`${fullName}'s Wedding`]); await client.query("insert into workspace_members (workspace_id,profile_id,role) values ($1,$2,'owner')", [workspace.rows[0].id, result.rows[0].id]); await client.query("insert into events (workspace_id,title) values ($1,$2)", [workspace.rows[0].id, "Our Wedding"]); await client.query("commit"); res.status(201).json({ user: safe(result.rows[0]), requiresApproval: true }); }
+  catch (error) { await client.query("rollback"); res.status(error.code === "23505" ? 409 : 500).json({ message: error.code === "23505" ? "Username already taken" : "Server error during registration" }); } finally { client.release(); }
+});
+router.post("/login", async (req, res) => { const { rows } = await database().query("select * from profiles where username=$1", [String(req.body.username || "").trim().toLowerCase()]); const user = rows[0]; if (!user || !(await bcrypt.compare(String(req.body.password || ""), user.password_hash))) return res.status(401).json({ message: "Invalid username or password" }); if (user.status !== "active") return res.status(403).json({ message: "User account is not yet active, please contact Admin" }); res.json({ token: token(user.id), user: safe(user) }); });
+router.post("/forgot-password", async (req, res) => { const { rows } = await database().query("select * from profiles where username=$1", [String(req.body.username || "").trim().toLowerCase()]); const user = rows[0]; if (!user || user.secret_question !== req.body.secretQuestion || !(await bcrypt.compare(String(req.body.secretAnswer || "").trim().toLowerCase(), user.secret_answer_hash || ""))) return res.status(400).json({ message: "The account details could not be verified" }); if (String(req.body.newPassword || "").length < 6) return res.status(400).json({ message: "Password must be at least 6 characters" }); await database().query("update profiles set password_hash=$1 where id=$2", [await bcrypt.hash(req.body.newPassword, 12), user.id]); res.json({ message: "Password reset successfully. You can now sign in." }); });
+module.exports = router;

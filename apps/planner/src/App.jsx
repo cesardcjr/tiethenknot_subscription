@@ -1,0 +1,190 @@
+import React, { lazy, Suspense, useState } from 'react';
+import { useApp } from './context/AppContext';
+import LoginPage from './pages/LoginPage';
+import Modal from './components/Modal';
+import Swal from 'sweetalert2';
+
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Guests = lazy(() => import('./pages/Guests'));
+const Seating = lazy(() => import('./pages/Seating'));
+const Expenses = lazy(() => import('./pages/Expenses'));
+const Tasks = lazy(() => import('./pages/Tasks'));
+const Checklist = lazy(() => import('./pages/Checklist'));
+const Program = lazy(() => import('./pages/Program'));
+const Suppliers = lazy(() => import('./pages/Suppliers'));
+const AdminUsers = lazy(() => import('./pages/AdminUsers'));
+
+const NAV_ITEMS = [
+  { page: 'dashboard', icon: 'fa-home', label: 'Dashboard' },
+  { page: 'guests', icon: 'fa-users', label: 'Guest List' },
+  { page: 'seating', icon: 'fa-chair', label: 'Seating Plan' },
+  { page: 'expenses', icon: 'fa-peso-sign', label: 'Finance Tracker' },
+  { page: 'tasks', icon: 'fa-list-check', label: 'To-Do Tasks' },
+  { page: 'checklist', icon: 'fa-clipboard-check', label: 'Event Checklist' },
+  { page: 'program', icon: 'fa-calendar-days', label: 'Program Flow' },
+  { page: 'suppliers', icon: 'fa-handshake', label: 'Supplier Details' },
+];
+
+const GUIDES = {
+  dashboard: { title: 'Dashboard', steps: [{ bold: 'Overview cards', detail: 'Each card shows a summary of a planning section. Click any card to navigate directly to that section.' }, { bold: 'Progress rings', detail: 'The circular progress rings update in real time as you add and complete items.' }] },
+  guests: { title: 'Guest List', steps: [{ bold: 'Set expected count', detail: 'The first time you open this page, enter how many guests you expect. You can adjust this later.' }, { bold: 'Add a guest', detail: 'Click + Add Guest. Fill in the name, category (Family, Friends, VIP, etc.), pax count, and confirmation status.' }, { bold: 'Principal & Secondary Sponsors', detail: 'Choose the "Principal" or "Secondary" category to list sponsors. They appear in the sponsor blocks below the table.' }, { bold: 'Filter and search', detail: 'Use the search bar and dropdowns to filter by category, status, table, or confirmation.' }, { bold: 'Pagination', detail: 'Results are paginated at 10 per page. Use the arrows to navigate.' }] },
+  seating: { title: 'Seating Plan', steps: [{ bold: 'Configure tables', detail: 'On first use, enter the number of regular tables and max guests per table.' }, { bold: 'Add guests to a table', detail: 'Click a table card to open the seating modal. Type a guest name to search and add them.' }, { bold: 'Presidential tables', detail: 'Use "Add Presidential" for head/VIP tables. These are tracked separately.' }, { bold: 'Remove a guest', detail: 'Click the × button next to a guest name in the table modal to unseat them.' }, { bold: 'Delete a table', detail: 'Click the trash icon on a table card. Guests on that table revert to "Not Seated".' }] },
+  expenses: { title: 'Finance Tracker', steps: [{ bold: 'Set budget', detail: 'On first use, enter your total event budget.' }, { bold: 'Add an expense', detail: 'Click + Add Expense. Enter the supplier name, type, total cost, payment status, and optional downpayment.' }, { bold: 'Payment progress bar', detail: 'Each row shows a color-coded progress bar: green = Paid, orange = Incomplete, red = Not Paid.' }, { bold: 'Balance auto-compute', detail: 'The balance field is automatically computed from total cost minus downpayment.' }] },
+  tasks: { title: 'To-Do Tasks', steps: [{ bold: 'Add a task', detail: 'Click + Add Task. Enter a title, optional details, a due date, and an initial status.' }, { bold: 'Change status inline', detail: 'Use the status dropdown directly in the task row to update status without opening the modal.' }, { bold: 'Overdue highlight', detail: 'Tasks past their due date (not Completed or Cancelled) are highlighted red.' }] },
+  checklist: { title: 'Event Checklist', steps: [{ bold: 'Add items', detail: 'Click + Add Item. Duplicate item names are not allowed.' }, { bold: 'Check off items', detail: 'Tick the checkbox on the left to mark an item as done. The row turns green when completed.' }, { bold: 'Filter', detail: 'Use the search box to find items, or filter by Completed / Not Yet Done.' }] },
+  program: { title: 'Program Flow', steps: [{ bold: 'Add activities', detail: 'Click + Add Activity. Enter a title, start and end time, and optional details.' }, { bold: 'Auto-sorted by time', detail: 'Activities are automatically sorted chronologically by start time.' }, { bold: 'Time format', detail: 'Times display in 12-hour AM/PM format (e.g. 6:00 PM – 6:30 PM).' }] },
+  suppliers: { title: 'Supplier Details', steps: [{ bold: 'Add a supplier', detail: 'Click + Add Supplier. Enter the name, category, quoted price, contact, location, and quote details.' }, { bold: 'Filter by category', detail: 'Use the category dropdown to view only suppliers of a specific type.' }, { bold: 'Edit & Delete', detail: 'Each supplier card has Edit and Delete buttons in the top-right corner.' }] },
+};
+
+function ReadMeModal({ page, onClose }) {
+  const guide = GUIDES[page] || GUIDES['dashboard'];
+  return (
+    <Modal title={`${guide.title} — How to Use`} onClose={onClose}>
+      <p className="readme-intro">Quick guide for the <strong>{guide.title}</strong> section.</p>
+      <div className="readme-steps">
+        {guide.steps.map((s, i) => (
+          <div key={i} className="readme-step">
+            <div className="readme-step-num">{i + 1}</div>
+            <div className="readme-step-body"><span className="readme-bold">{s.bold}</span> — {s.detail}</div>
+          </div>
+        ))}
+      </div>
+      <div className="modal-footer"><button type="button" className="btn-primary" onClick={onClose}>Got it</button></div>
+    </Modal>
+  );
+}
+
+export default function App() {
+  const { user, eventData, logoutUser, loading, dataError, fetchData } = useApp();
+  const [page, setPage] = useState('dashboard');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [showReadMe, setShowReadMe] = useState(false);
+  const invitationAppUrl = import.meta.env.VITE_INVITATION_APP_URL || 'http://localhost:5174';
+
+  if (!user) return <LoginPage />;
+
+  const isMobile = () => window.innerWidth <= 900;
+
+  const navigate = (p) => {
+    setPage(p);
+    if (isMobile()) setSidebarOpen(false);
+  };
+
+  const toggleSidebar = () => {
+    if (isMobile()) setSidebarOpen(o => !o);
+    else setSidebarCollapsed(c => !c);
+  };
+
+  const handleLogout = async () => {
+    const r = await Swal.fire({ icon: 'question', title: 'Sign Out?', showCancelButton: true, confirmButtonText: 'Yes, logout', confirmButtonColor: '#226b45' });
+    if (r.isConfirmed) logoutUser();
+  };
+
+  const exportAllData = async () => {
+    if (!eventData) return;
+    const { default: ExcelJS } = await import('exceljs');
+    const { guests = [], expenses = [], tasks = [], checklist = [], program = [], suppliers = [] } = eventData;
+    const workbook = new ExcelJS.Workbook();
+    const date = new Date().toISOString().slice(0, 10);
+    const addSheet = (name, rows) => {
+      if (!rows.length) return;
+      const sheet = workbook.addWorksheet(name, { views: [{ state: 'frozen', ySplit: 1 }] });
+      sheet.columns = Object.keys(rows[0]).map(key => ({ header: key, key, width: Math.min(40, Math.max(12, key.length + 4)) }));
+      sheet.addRows(rows);
+      sheet.getRow(1).eachCell(cell => {
+        cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF226B45' } };
+      });
+      sheet.autoFilter = { from: 'A1', to: `${sheet.getColumn(sheet.columnCount).letter}1` };
+    };
+
+    addSheet('Guests', guests.map(g => ({ Name: g.name, InvitedPax: g.pax, RSVP: g.rsvpStatus || (g.confirmed ? 'Accepted' : 'Pending'), AttendingPax: g.attendingPax || 0, DeclineReason: g.declineReason || '', Category: g.category, SeatingStatus: g.status, Table: g.tableNumber || '', InvitationStatus: g.invitationStatus || 'Not Created', DietaryNotes: g.dietaryNotes || '', GuestMessage: g.guestMessage || '', Remarks: g.remarks || '' })));
+    addSheet('Expenses', expenses.map(e => ({ Supplier: e.supplierName, Type: e.expenseType, Cost: e.cost, Downpayment: e.downpayment, Balance: (e.cost || 0) - (e.downpayment || 0), Contact: e.contactPerson || '', Number: e.contactNum || '', Payment: e.paymentStatus, Tracker: e.paymentTracker || '' })));
+    addSheet('Tasks', tasks.map(t => ({ Title: t.title, Details: t.details || '', DueDate: t.dueDate || '', Status: t.status })));
+    addSheet('Checklist', checklist.map(c => ({ Item: c.title, Details: c.details || '', Done: c.checked ? 'Yes' : 'No' })));
+    addSheet('Program', [...program].sort((a, b) => (a._start || '').localeCompare(b._start || '')).map(p => ({ Activity: p.title, Start: p.startTime, End: p.endTime, Details: p.details || '' })));
+    addSheet('Suppliers', suppliers.map(s => ({ Supplier: s.supplierName, Category: s.categoryType, QuotedPrice: s.quotedPrice, Contact: s.contactPerson || '', Number: s.contactNum || '', Location: s.location || '', Links: s.links || '', Details: s.quoteDetails || '' })));
+
+    if (!workbook.worksheets.length) return Swal.fire({ icon: 'info', title: 'No data to export yet.', confirmButtonColor: '#226b45' });
+    const buffer = await workbook.xlsx.writeBuffer();
+    const url = URL.createObjectURL(new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `TieTheKnot_${user.username}_${date}.xlsx`;
+    link.click();
+    URL.revokeObjectURL(url);
+    Swal.fire({ icon: 'success', title: 'Export Complete', timer: 1600, showConfirmButton: false });
+  };
+
+  const pageTitles = { dashboard: 'Dashboard', guests: 'Guest List', seating: 'Seating Plan', expenses: 'Finance Tracker', tasks: 'To-Do Tasks', checklist: 'Event Checklist', program: 'Program Flow', suppliers: 'Supplier Details', users: 'User Accounts' };
+
+  const pageComponent = { dashboard: Dashboard, guests: Guests, seating: Seating, expenses: Expenses, tasks: Tasks, checklist: Checklist, program: Program, suppliers: Suppliers, users: AdminUsers }[page];
+  const navItems = user.isAdmin
+    ? [...NAV_ITEMS, { page: 'users', icon: 'fa-user-shield', label: 'User Accounts' }]
+    : NAV_ITEMS;
+
+  return (
+    <div className="app-shell">
+      {/* Sidebar overlay (mobile) */}
+      {sidebarOpen && <div className="sidebar-overlay active" onClick={() => setSidebarOpen(false)} />}
+
+      <aside className={`sidebar${sidebarOpen ? ' open' : ''}${sidebarCollapsed ? ' collapsed' : ''}`}>
+        <div className="sidebar-brand">
+          <i className="fa-solid fa-rings-wedding" /><span>TieTheKnot PH</span>
+        </div>
+        <div className="sidebar-user">
+          <div className="avatar"><i className="fa fa-user" /></div>
+          <div className="user-info">
+            <span className="user-name">{user.fullName}</span>
+            <span className="user-role">{user.isAdmin ? 'Administrator' : 'Event Planner'}</span>
+          </div>
+        </div>
+        <nav className="sidebar-nav">
+          <div className="nav-label">Menu</div>
+          {navItems.map(({ page: p, icon, label }) => (
+            <button type="button" key={p} className={`nav-item${page === p ? ' active' : ''}`} onClick={() => navigate(p)}>
+              <i className={`fa ${icon}`} /><span>{label}</span>
+            </button>
+          ))}
+        </nav>
+        <div className="sidebar-footer">
+          <a className="btn-studio" href={invitationAppUrl} target="_blank" rel="noreferrer">
+            <i className="fa fa-envelope-open-text" /><span>Invitation Studio</span>
+          </a>
+          <button className="btn-logout" onClick={handleLogout}>
+            <i className="fa fa-sign-out-alt" /><span>Logout</span>
+          </button>
+        </div>
+      </aside>
+
+      <main className="main-content">
+        <div className="topbar">
+          <button type="button" className="sidebar-toggle" aria-label="Toggle navigation" aria-expanded={sidebarOpen || !sidebarCollapsed} onClick={toggleSidebar}><i className="fa fa-bars" /></button>
+          <div className="topbar-title">{pageTitles[page]}</div>
+          <div className="topbar-actions">
+            <button type="button" className="btn-icon btn-readme" onClick={() => setShowReadMe(true)} title="Read Me / Guide" aria-label="Open page guide">
+              <i className="fa fa-book-open" /><span className="btn-icon-label"> Read Me</span>
+            </button>
+            <button type="button" className="btn-icon" title="Export Data" onClick={exportAllData} aria-label="Export event data">
+              <i className="fa fa-file-arrow-down" /><span className="btn-icon-label"> Export</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="page active">
+          {loading && !eventData
+            ? <div className="page-loading"><i className="fa fa-spinner fa-spin" /> Loading your data…</div>
+            : dataError && !eventData
+              ? <div className="error-state" role="alert"><i className="fa fa-circle-exclamation" /><h2>We couldn't load your data</h2><p>{dataError}</p><button type="button" className="btn-primary" onClick={fetchData}>Try Again</button></div>
+              : <Suspense fallback={<div className="page-loading"><i className="fa fa-spinner fa-spin" /> Loading section…</div>}>
+                {React.createElement(pageComponent, { onNavigate: navigate })}
+              </Suspense>
+          }
+        </div>
+      </main>
+
+      {showReadMe && <ReadMeModal page={page} onClose={() => setShowReadMe(false)} />}
+    </div>
+  );
+}
